@@ -11,25 +11,44 @@ import (
 
 type NginxServer struct {
 	NginxPath string
-	VersionPath string
+	Versions []Server
 }
 
 
 func (n *NginxServer) Start() {
-	path := filepath.Join(n.NginxPath, n.VersionPath)
-	// fmt.Println("nginx starting...")
-	// 定义个切片，存储命令
-	params := []string{"-p", path}
-	exe := filepath.Join(path, "nginx.exe")
-	cmd := exec.Command(exe, params...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		fmt.Printf("failed to start nginx: %v\n", err)
-		return
+	for _, nginx := range n.Versions {
+		if nginx.Active == 1 {
+			path := filepath.Join(n.NginxPath, nginx.Path)
+			fmt.Println("nginx path", path)
+			// 定义个切片，存储命令
+			params := []string{"-p", path}
+			exe := filepath.Join(path, "nginx.exe")
+			cmd := exec.Command(exe, params...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			// cmd.Stdout = os.Stdout
+			// cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				fmt.Printf("failed to start nginx: %v\n", err)
+				return
+			}
+			fmt.Println("nginx started successfully")
+			break;
+		}
 	}
-	fmt.Println("nginx started successfully")
+	// path := filepath.Join(n.NginxPath, n.VersionPath)
+	// fmt.Println("nginx path", path)
+	// // 定义个切片，存储命令
+	// params := []string{"-p", path}
+	// exe := filepath.Join(path, "nginx.exe")
+	// cmd := exec.Command(exe, params...)
+	// cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// // cmd.Stdout = os.Stdout
+	// // cmd.Stderr = os.Stderr
+	// if err := cmd.Start(); err != nil {
+	// 	fmt.Printf("failed to start nginx: %v\n", err)
+	// 	return
+	// }
+	// fmt.Println("nginx started successfully")
 }
 
 func (n *NginxServer) Stop() {

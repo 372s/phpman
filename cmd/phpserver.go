@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"gwnp/util"
 	"log"
 	"os/exec"
 	"path/filepath"
@@ -10,15 +11,12 @@ import (
 	"syscall"
 )
 
-type PhpVersionEntry struct {
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
-}
+
 
 type PHPServer struct {
 	PhpCgiSpawnerFile string
 	PhpPath           string
-	Versions          []PhpVersionEntry
+	Versions          []Server
 }
 
 func startPHP(PhpCgiSpawnerFile, PhpPath, path, port string) {
@@ -42,14 +40,12 @@ func startPHP(PhpCgiSpawnerFile, PhpPath, path, port string) {
 
 func (p *PHPServer) Start() {
 	var vs = []string{}
+	util.NewUtilLog().Debug(fmt.Sprintf("Starting PHP versions %v", p.Versions))
 	for _, php := range p.Versions {
-		if php.Active {
-			// path=php-8.1.30-nts-Win32-vc15-x64
-			version := php.Name[4:7]
-			// 删掉版本号中的.
-			port := "90" + strings.ReplaceAll(version, ".", "")
-			startPHP(p.PhpCgiSpawnerFile, p.PhpPath, php.Name, port)
-			vs = append(vs, version)
+		if php.Active == 1 {
+			startPHP(p.PhpCgiSpawnerFile, p.PhpPath, php.Path, php.Port)
+			util.NewUtilLog().Debug(fmt.Sprintf("Starting PHP %v", php))
+			vs = append(vs, php.Version)
 		}
 	}
 

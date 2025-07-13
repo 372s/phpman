@@ -4,174 +4,51 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"gwnp/cmd"
+	"log"
+
+	// "gwnp/util"
+
+	// "gwnp/util"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/getlantern/systray"
 )
 
-type PhpVersions map[string]bool
-
-type PhpVersionList []cmd.PhpVersionEntry
-
-func main() {
-	systray.Run(onReady, nil)
+type Env struct {
+	Root              string
+	BinPath           string
+	NginxPath         string
+	PhpPath           string
+	PhpCgiSpawnerFile string
+	IconPath          string
+	PHPServer         *cmd.PHPServer
+	NginxServer       *cmd.NginxServer
+	PHPServerMenuItem *systray.MenuItem
+	NginxServerMenuItem *systray.MenuItem
 }
 
-func onReady() {
-	root := initRootPath()
-	configFile := filepath.Join(root, "settings.json")
-	nginxPath := filepath.Join(root, "servers", "nginx")
-	phpPath := filepath.Join(root, "servers", "php")
-	iconPath := filepath.Join(root, "icon")
-	nginxVersion := "nginx-1.22.1"
-	phpCgiSpawnerFile := filepath.Join(root, "bin", "php-cgi-spawner", "php-cgi-spawner.exe")
+type PhpVersionList []cmd.Server
 
-	// 判断是否有settings.json文件
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		phpList := readPHPDIR(phpPath)
-		writeToJson(phpList, configFile)
-	}
+type NginxList []cmd.Server
 
-	// 读取settings.json文件，加到phpServer.Versions中
-	phpVersions := readJson(configFile)
-
-	// 创建server
-	phpServer := &cmd.PHPServer{PhpCgiSpawnerFile: phpCgiSpawnerFile, PhpPath: phpPath, Versions: phpVersions}
-	nginxServer := &cmd.NginxServer{NginxPath: nginxPath, VersionPath: nginxVersion}
-
-	// 配置菜单
-	systray.SetTitle("GNP")
-	systray.SetTooltip("GNP")
-	setTempIcon := func() {
-		if phpServer.Status() && nginxServer.Status() {
-			startIcon, _ := os.ReadFile(filepath.Join(iconPath, "start.ico"))
-			systray.SetTemplateIcon(startIcon, startIcon)
-		} else if nginxServer.Status() || phpServer.Status() {
-			someoneIco, _ := os.ReadFile(filepath.Join(iconPath, "someone.ico"))
-			systray.SetTemplateIcon(someoneIco, someoneIco)
-		} else {
-			stopIco, _ := os.ReadFile(filepath.Join(iconPath, "stop.ico"))
-			systray.SetTemplateIcon(stopIco, stopIco)
-		}
-	}
-	go func() {
-		setTempIcon()
-	}()
-
-	mPHP := systray.AddMenuItem("选择启用的PHP版本(可多选)", "")
-	mPHP.Disable()
-	// 创建php版本菜单
-	for k, php := range phpVersions {
-		// fmt.Println(k, php)
-		tray := systray.AddMenuItemCheckbox(php.Name, php.Name, php.Active)
-		go func(tray *systray.MenuItem, k int, php cmd.PhpVersionEntry, configFile string) {
-			for {
-				<-tray.ClickedCh
-				fmt.Println("Clicked on", tray, php)
-				if tray.Checked() {
-					tray.Uncheck()
-					phpVersions[k].Active = false
-				} else {
-					tray.Check()
-					// 如何覆盖phpVersions数据
-					phpVersions[k].Active = true
-				}
-				writeToJson(phpVersions, configFile)
-			}
-		}(tray, k, php, configFile)
-	}
-
-	// 添加一个分隔符
-	systray.AddSeparator()
-
-	// 添加一个菜单项
-	server := systray.AddMenuItem("启动服务", "启动服务")
-	server.Disable()
-
-	all := systray.AddMenuItem("所有服务", "")
-	allStart := all.AddSubMenuItem("start", "start")
-	allStop := all.AddSubMenuItem("stop", "stop")
-	allRestart := all.AddSubMenuItem("restart", "restart")
-
-	// 检查php是否启动h状态
-
-	php := systray.AddMenuItemCheckbox("php", "php", phpServer.Status())
-	phpStart := php.AddSubMenuItem("start", "start")
-	phpStop := php.AddSubMenuItem("stop", "stop")
-	phpRestart := php.AddSubMenuItem("restart", "restart")
-
-	// 检查nginx是否启动
-	nginx := systray.AddMenuItemCheckbox("nginx", "nginx", nginxServer.Status())
-	nginxStart := nginx.AddSubMenuItem("start", "start")
-	nginxStop := nginx.AddSubMenuItem("stop", "stop")
-	nginxRestart := nginx.AddSubMenuItem("restart", "restart")
-
-	// 退出
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit", "Quit the whole app")
-	go func() {
-		for {
-			select {
-			case <-mQuit.ClickedCh:
-				systray.Quit()
-				return
-			case <-allStart.ClickedCh:
-				fmt.Println("---- All start ---- ")
-				phpServer.Start()
-				nginxServer.Start()
-				php.Check()
-				nginx.Check()
-			case <-allStop.ClickedCh:
-				fmt.Println("---- All Stop ---- ")
-				phpServer.Stop()
-				nginxServer.Stop()
-				php.Uncheck()
-				nginx.Uncheck()
-			case <-allRestart.ClickedCh:
-				fmt.Println("---- All Restart ---- ")
-				phpServer.Stop()
-				nginxServer.Stop()
-				phpServer.Start()
-				nginxServer.Start()
-				php.Check()
-				nginx.Check()
-			case <-phpStart.ClickedCh:
-				fmt.Println("---- PHP start ---- ")
-				phpServer.Start()
-				php.Check()
-			case <-phpStop.ClickedCh:
-				fmt.Println("---- PHP stop ---- ")
-				phpServer.Stop()
-				php.Uncheck()
-			case <-phpRestart.ClickedCh:
-				fmt.Println("---- PHP restart ---- ")
-				phpServer.Stop()
-				phpServer.Start()
-				php.Check()
-			case <-nginxStart.ClickedCh:
-				fmt.Println("---- nginx start ---- ")
-				nginxServer.Start()
-				nginx.Check()
-			case <-nginxStop.ClickedCh:
-				fmt.Println("---- nginx stop ---- ")
-				nginxServer.Stop()
-				nginx.Uncheck()
-			case <-nginxRestart.ClickedCh:
-				fmt.Println("---- nginx restart ---- ")
-				nginxServer.Stop()
-				nginxServer.Start()
-				nginx.Check()
-			}
-			setTempIcon()
-		}
-	}()
+type updateNginxMenuItem struct {
+	index int
+	item  *systray.MenuItem
 }
+
+type UpdateSelectedServer struct {
+	index int
+	Server cmd.Server
+	// Action string
+}
+
+var updateSelectedServerCh = make(chan UpdateSelectedServer)
 
 func initRootPath() string {
 	root := os.Getenv("GWNP_ROOT")
@@ -182,84 +59,423 @@ func initRootPath() string {
 	return root
 }
 
-// func onTest() {
-// 	startIcon, _ := os.ReadFile("start.ico")
-// 	systray.SetIcon(startIcon)
-// 	setTempIcon := func() {
-// 		if nginxServer.Status() {
-// 			// startIcon, _ := os.ReadFile("start.ico")
-// 			// systray.SetIcon(startIcon)
-// 		}
-// 	}
-// 	go func() {
-// 		setTempIcon()
-// 	}()
-// 	systray.SetTitle("GNP")
-// 	systray.SetTooltip("GNP")
-// 	mQuit := systray.AddMenuItem("Quit", "Quit the whole app")
-// 	go func() {
-// 		for {
-// 			<-mQuit.ClickedCh
-// 			systray.Quit()
-// 		}
-// 	}()
-// }
+func main() {
+	MustCreateTable()
 
-func readPHPDIR(phpPath string) PhpVersionList {
+	systray.Run(onReady, nil)
+}
+
+func onReady() {
+	// root := "D:\\phpserv"
+	// util.NewUtilLog().Debug(fmt.Sprintf("GWNP_ROOT: %v", os.Getenv("GWNP_ROOT")))
+	// utilLog.Debug(fmt.Sprintf("Path: %v", os.Getenv("Path")))
+	root := initRootPath()
+	env := &Env{
+		Root:              root,
+		BinPath:           filepath.Join(root, "bin"),
+		IconPath:          filepath.Join(root, "icon"),
+		NginxPath:         filepath.Join(root, "servers", "nginx"),
+		PhpPath:           filepath.Join(root, "servers", "php"),
+		PhpCgiSpawnerFile: filepath.Join(root, "bin", "php-cgi-spawner", "php-cgi-spawner.exe"),
+	}
+
+	// 创建server
+	env.PHPServer = &cmd.PHPServer{PhpCgiSpawnerFile: env.PhpCgiSpawnerFile, PhpPath: env.PhpPath}
+	env.NginxServer = &cmd.NginxServer{NginxPath: env.NginxPath}
+
+	// 配置菜单
+	systray.SetTitle("NP")
+	systray.SetTooltip("NP")
+	setTempIcon(env)
+
+	phpVersions := getPhpVersions(env)
+	env.PHPServer.Versions = phpVersions
+
+	nginxVersions := getNginxVersions(env)
+	env.NginxServer.Versions = nginxVersions
+
+	go watchServerSelected(env, &nginxVersions, phpVersions)
+
+	// 创建php版本选择菜单
+	systray.AddMenuItem("选择启用的PHP版本(可多选)", "").Disable()
+	setPhpSelectMenuItem(phpVersions)
+
+	// 创建Nginx版本选择菜单
+	systray.AddMenuItem("选择启用的Nginx版本(单选)", "").Disable()
+	setNginxSelectMenuItem(nginxVersions)
+
+	// 添加一个分隔符
+	systray.AddSeparator()
+
+	// 添加一个菜单项
+	(systray.AddMenuItem("启动服务", "启动服务")).Disable()
+
+	// 操作php 服务
+	setPhpServerMenuItem(env)
+
+	// 操作nginx服务
+	setNginxServerMenuItem(env)
+
+	// 操作php+nginx 服务
+	// systray.AddMenuItem("启动服务", "启动服务").Disable()
+	setAllServersMenuItems(env)
+
+	// 退出
+	quit()
+}
+
+func setTempIcon(env *Env) {
+	if env.PHPServer.Status() && env.NginxServer.Status() {
+		startIcon, _ := os.ReadFile(filepath.Join(env.IconPath, "start.ico"))
+		systray.SetTemplateIcon(startIcon, startIcon)
+	} else if env.PHPServer.Status() || env.NginxServer.Status() {
+		someoneIco, _ := os.ReadFile(filepath.Join(env.IconPath, "someone.ico"))
+		systray.SetTemplateIcon(someoneIco, someoneIco)
+	} else {
+		stopIco, _ := os.ReadFile(filepath.Join(env.IconPath, "stop.ico"))
+		systray.SetTemplateIcon(stopIco, stopIco)
+	}
+}
+
+func MustCreateTable() {
+	cmd.CreateSettionsTable()
+}
+
+func getNginxVersions(env *Env) []cmd.Server { 
+	nginxList := readNginxDIR(env.NginxPath)
+	// util.NewUtilLog().Log(fmt.Sprintf("nginxList: %v", nginxList))
+	return saveServers(nginxList)
+}
+
+func getPhpVersions(env *Env) []cmd.Server { 
+	phpList := readPhpDIR(env.PhpPath)
+	// util.NewUtilLog().Log(fmt.Sprintf("phpList: %v", phpList))
+	return saveServers(phpList)
+}
+
+
+func watchServerSelected(env *Env, nginxList *[]cmd.Server, phpVersions []cmd.Server) {
+	for req := range updateSelectedServerCh { 
+		log.Println("watchServerSelected : ", req.Server)
+		// 解引用指针后进行索引操作
+		// cmd.UpdateServerInDB(req.Server)
+		if req.Server.Name == "nginx" { 
+			if req.index >= 0 && req.index < len(*nginxList) {
+				(*nginxList)[req.index] = req.Server
+			}
+			for idx, nginx := range *nginxList {
+				if idx != req.index && req.Server.Active == 1 {
+					nginx.Active = 0
+					(*nginxList)[idx] = nginx
+				}
+			}
+			log.Println("nginx list : ", *nginxList)
+			env.NginxServer.Versions = *nginxList
+			cmd.UpdateNginxServerActiveInDB(req.Server.Active, req.Server.Version)
+		} else { 
+			if req.index >= 0 && req.index < len(phpVersions) {
+				phpVersions[req.index] = req.Server
+			}
+			env.PHPServer.Versions = phpVersions
+			cmd.UpdateServerInDB(req.Server)
+		}
+		
+	}
+}
+
+
+func setPhpSelectMenuItem(phpVersions []cmd.Server) {
+	
+	for index, php := range phpVersions {
+		tray := systray.AddMenuItemCheckbox(php.Path, php.Path, (php.Active == 1))
+		go func(tray *systray.MenuItem, php cmd.Server, idx int) {
+			for {
+				<-tray.ClickedCh
+				if tray.Checked() {
+					tray.Uncheck()
+					php.Active = 0
+				} else {
+					tray.Check()
+					php.Active = 1
+				}
+				updateSelectedServerCh <- UpdateSelectedServer{idx, php}
+				// fmt.Println(php)
+				// cmd.UpdateServerInDB(php)
+			}
+		}(tray, php, index)
+	}
+}
+
+func setNginxSelectMenuItem(nginxList []cmd.Server) {
+	
+
+	updateNginxChan := make(chan updateNginxMenuItem)
+	nginxBoxes := make([]*systray.MenuItem, 0)
+
+	go func() {
+		// for req := range updateNginxChan {
+		// 	fmt.Println("req: ", req.item)
+		// 	nginxBoxes[req.index] = req.item
+		// }
+		for {
+			req, ok := <-updateNginxChan
+			if !ok {
+				break // channel 已关闭
+			}
+			log.Println("update nginx menu item req: ", req.item)
+			nginxBoxes[req.index] = req.item
+		}
+	}()
+
+	for _, nginxserver := range nginxList {
+		nginxCheckBox := systray.AddMenuItemCheckbox(nginxserver.Path, nginxserver.Path, (nginxserver.Active == 1))
+		nginxBoxes = append(nginxBoxes, nginxCheckBox)
+	}
+
+	for index, nginxCheckBox := range nginxBoxes {
+		nginxserver := nginxList[index]
+		go func(tray *systray.MenuItem, nginxserver cmd.Server, idx int) {
+			for {
+				<-tray.ClickedCh
+				// fmt.Println("Clicked on", tray, tray.Checked())
+				if tray.Checked() {
+					nginxserver.Active = 0
+					tray.Uncheck()
+				} else {
+					nginxserver.Active = 1
+					for _, nginxCheckBox := range nginxBoxes {
+						if nginxCheckBox != tray {
+							nginxCheckBox.Uncheck()
+						}
+					}
+					tray.Check()
+				}
+				updateNginxChan <- updateNginxMenuItem{idx, tray}
+				updateSelectedServerCh <- UpdateSelectedServer{idx, nginxserver}
+				// fmt.Println("Clicked on", tray, tray.Checked())
+			}
+		}(nginxCheckBox, nginxserver, index)
+	}
+}
+
+func setPhpServerMenuItem(env *Env) {
+	// 检查php是否启动h状态
+	phpMenuItem := systray.AddMenuItemCheckbox("php", "php", env.PHPServer.Status())
+	env.PHPServerMenuItem = phpMenuItem
+	phpServerStart := phpMenuItem.AddSubMenuItem("start", "start")
+	phpServerStop := phpMenuItem.AddSubMenuItem("stop", "stop")
+	phpServerRestart := phpMenuItem.AddSubMenuItem("restart", "restart")
+	go func() {
+		for {
+			select {
+			case <-phpServerStart.ClickedCh:
+				serverHandle(env, "php", "start")
+			case <-phpServerStop.ClickedCh:
+				serverHandle(env, "php", "stop")
+			case <-phpServerRestart.ClickedCh:
+				serverHandle(env, "php", "restart")
+			}
+			if env.PHPServer.Status() {
+				phpMenuItem.Check()
+			} else {
+				phpMenuItem.Uncheck()
+			}
+			env.PHPServerMenuItem = phpMenuItem
+			setTempIcon(env)
+		}
+	}()
+}
+
+func setNginxServerMenuItem(env *Env) { 
+	// 检查nginx是否启动
+	env.NginxServerMenuItem = systray.AddMenuItemCheckbox("nginx", "nginx", env.NginxServer.Status())
+	nginxServerStart := env.NginxServerMenuItem.AddSubMenuItem("start", "start")
+	nginxServerStop := env.NginxServerMenuItem.AddSubMenuItem("stop", "stop")
+	nginxServerRestart := env.NginxServerMenuItem.AddSubMenuItem("restart", "restart")
+	go func() {
+		for {
+			select {
+			case <-nginxServerStart.ClickedCh:
+				serverHandle(env, "nginx", "start")
+				env.NginxServerMenuItem.Check()
+			case <-nginxServerStop.ClickedCh:
+				serverHandle(env, "nginx", "stop")
+				env.NginxServerMenuItem.Uncheck()
+			case <-nginxServerRestart.ClickedCh:
+				serverHandle(env, "nginx", "restart")
+				env.NginxServerMenuItem.Check()
+			}
+			setTempIcon(env)
+		}
+	}()
+}
+
+func setAllServersMenuItems(env *Env) {
+	all := systray.AddMenuItem("所有服务", "")
+	allStart := all.AddSubMenuItem("start", "start")
+	allStop := all.AddSubMenuItem("stop", "stop")
+	allRestart := all.AddSubMenuItem("restart", "restart")
+	go func() {
+		for {
+			select {
+			case <-allStart.ClickedCh:
+				serverHandle(env, "", "start")
+				env.PHPServerMenuItem.Check()
+				env.NginxServerMenuItem.Check()
+			case <-allStop.ClickedCh:
+				serverHandle(env, "", "stop")
+				env.PHPServerMenuItem.Uncheck()
+				env.NginxServerMenuItem.Uncheck()
+			case <-allRestart.ClickedCh:
+				serverHandle(env, "", "restart")
+				env.PHPServerMenuItem.Check()
+				env.NginxServerMenuItem.Check()
+			}
+
+			// select {
+			// case <-env.PHPServerMenuItem:
+			// 	php.Check()
+			// case <-env.PHPServerMenuItem:
+			// 	php.Uncheck()
+			// case <-env.PHPServerMenuItem:
+			// 	nginx.Check()
+			// case <-env.PHPServerMenuItem:
+			// 	nginx.Uncheck()
+			// default:
+			// }
+
+			setTempIcon(env)
+		}
+	}()
+}
+
+func serverHandle(env *Env, name, action string) {
+	log.Println("phpserver: ", env.PHPServer)
+	log.Println("nginxserver: ", env.NginxServer)
+	switch action {
+	case "start":
+		switch name {
+		case "php":
+			// env.PHPServer.Versions = cmd.GetActiveServersFromDB("php")
+			env.PHPServer.Start()
+		case "nginx":
+			// iServer, _ := cmd.GetActiveServerRow("nginx", 1)
+			// env.NginxServer.VersionPath = iServer.Path
+			env.NginxServer.Start()
+		default:
+			env.PHPServer.Start()
+			// iServer, _ := cmd.GetActiveServerRow("nginx", 1)
+			// env.NginxServer.VersionPath = iServer.Path
+			env.NginxServer.Start()
+		}
+	case "stop":
+		switch name {
+		case "php":
+			env.PHPServer.Stop()
+		case "nginx":
+			env.NginxServer.Stop()
+		default:
+			env.PHPServer.Stop()
+			env.NginxServer.Stop()
+		}
+	case "restart":
+		switch name {
+		case "php":
+			env.PHPServer.Stop()
+			// env.PHPServer.Versions = cmd.GetActiveServersFromDB("php")
+			env.PHPServer.Start()
+		case "nginx":
+			env.NginxServer.Stop()
+			// iServer, _ := cmd.GetActiveServerRow("nginx", 1)
+			// env.NginxServer.VersionPath = iServer.Path
+			env.NginxServer.Start()
+		default:
+			env.PHPServer.Stop()
+			env.NginxServer.Stop()
+
+			// env.PHPServer.Versions = cmd.GetActiveServersFromDB("php")
+			env.PHPServer.Start()
+
+			// iServer, _ := cmd.GetActiveServerRow("nginx", 1)
+			// env.NginxServer.VersionPath = iServer.Path
+			env.NginxServer.Start()
+		}
+	}
+}
+
+func readPhpDIR(phpPath string) PhpVersionList {
 	phpVersions := make(PhpVersionList, 0)
 	file, err := os.ReadDir(phpPath)
 	if err != nil {
 		fmt.Println(err)
 		return phpVersions
 	}
-	//把servers转为json
-	//写入settings.json文件
-
 	for _, f := range file {
 		if f.IsDir() {
-			if strings.HasPrefix(f.Name(), "php") {
-				phpVersions = append(phpVersions, cmd.PhpVersionEntry{Name: f.Name(), Active: false})
+			// 匹配php目录：php-7.4.25-Win32-vc15-x64
+			re := regexp.MustCompile(`^php-\d+\.\d+\.\d+`)
+			if strings.HasPrefix(f.Name(), "php") && re.MatchString(f.Name()) {
+				// php-8.1.30-nts-Win32-vc15-x64
+				filename := f.Name()
+				version := filename[4:7]
+				// 删掉版本号中的.
+				port := "90" + strings.ReplaceAll(version, ".", "")
+				phpVersions = append(phpVersions, cmd.Server{Name: "php", Path: f.Name(), Port: port, Version: version, Active: 0})
 			}
 		}
 	}
 	return phpVersions
 }
 
-func writeToJson(servers PhpVersionList, configFile string) {
-	jsonData, err := json.Marshal(servers)
+func readNginxDIR(path string) NginxList {
+	list := make(NginxList, 0)
+	file, err := os.ReadDir(path)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		fmt.Println(err)
+		return list
 	}
-	// 写入之前如何格式化json字符串
-	// 使用 json.Indent 实现格式化输出
-	var prettyJSON []byte
-	buffer := new(bytes.Buffer)
-	err = json.Indent(buffer, jsonData, "", "    ")
-	if err != nil {
-		fmt.Println("格式化 JSON 错误:", err)
-		return
+	for _, f := range file {
+		if f.IsDir() {
+			// 匹配php目录：php-7.4.25-Win32-vc15-x64
+			re := regexp.MustCompile(`^nginx-\d+\.\d+\.\d+`)
+			if re.MatchString(f.Name()) {
+				// nginx-1.21.1
+				filename := f.Name()
+				// 删掉版本号中的.
+				version := strings.ReplaceAll(filename, "nginx-", "")
+				list = append(list, cmd.Server{Name: "nginx", Path: f.Name(), Version: version, Active: 0})
+			}
+		}
 	}
-	prettyJSON = buffer.Bytes()
-	jsonData = prettyJSON
-
-	os.WriteFile(configFile, jsonData, 0644)
-	fmt.Println(configFile, "写入成功")
+	return list
 }
 
-func readJson(configFile string) PhpVersionList {
-	// 读取settings.json文件
-	phpVersions := make(PhpVersionList, 0)
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		fmt.Println(err)
-		return phpVersions
+func saveServers(servers []cmd.Server) []cmd.Server {
+	var data []cmd.Server
+	for _, server := range servers {
+		newserver, err := cmd.GetServerRow(server.Name, server.Version)
+		if err == sql.ErrNoRows {
+			newserver.Active = server.Active
+			newserver.Name = server.Name
+			newserver.Path = server.Path
+			newserver.Port = server.Port
+			newserver.Version = server.Version
+			cmd.SaveServerToDB(newserver)
+		}
+		data = append(data, newserver)
 	}
-	// fmt.Println(string(data))
-	err = json.Unmarshal(data, &phpVersions)
-	if err != nil {
-		fmt.Println(err)
-		return phpVersions
-	}
-	return phpVersions
+	return data
+}
+
+
+func quit() {
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Quit", "Quit the whole app")
+	go func() {
+		for {
+			<-mQuit.ClickedCh
+			systray.Quit()
+			return
+		}
+	}()
 }
