@@ -18,14 +18,12 @@ jobs:
           go-version: "1.24.3"
 
       - name: Build Go binary
-        run: |
-          go build -ldflags="-s -w -H=windowsgui" -o phpman-win.exe
-          tar -czvf phpman-win.tar.gz phpman-win.exe
+        run: go build -ldflags="-s -w -H=windowsgui" -o phpman-win.exe
+
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
         with:
           files: |
             phpman-win.exe
-            phpman-win.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
