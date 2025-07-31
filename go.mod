@@ -1,4 +1,4 @@
-module gwnp
+module phpman
 
 go 1.24.3
 

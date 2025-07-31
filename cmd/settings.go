@@ -3,7 +3,7 @@ package cmd
 import (
 	"database/sql"
 	"fmt"
-	"gwnp/util"
+	"phpman/util"
 	"log"
 	"path/filepath"
 

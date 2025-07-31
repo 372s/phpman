@@ -3,7 +3,7 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"gwnp/util"
+	"phpman/util"
 	"log"
 	"os/exec"
 	"path/filepath"

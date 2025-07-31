@@ -6,12 +6,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"gwnp/cmd"
+	"phpman/cmd"
 	"log"
-
-	// "gwnp/util"
-
-	// "gwnp/util"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -70,45 +66,47 @@ func onReady() {
 	// util.NewUtilLog().Debug(fmt.Sprintf("GWNP_ROOT: %v", os.Getenv("GWNP_ROOT")))
 	// utilLog.Debug(fmt.Sprintf("Path: %v", os.Getenv("Path")))
 	root := initRootPath()
+	phpCgiSpawnerFile := filepath.Join(root, "bin", "php-cgi-spawner", "php-cgi-spawner.exe")
+	phpPath := filepath.Join(root, "servers", "php")
+	nginxPath := filepath.Join(root, "servers", "nginx")
 	env := &Env{
 		Root:              root,
 		BinPath:           filepath.Join(root, "bin"),
 		IconPath:          filepath.Join(root, "icon"),
-		NginxPath:         filepath.Join(root, "servers", "nginx"),
-		PhpPath:           filepath.Join(root, "servers", "php"),
-		PhpCgiSpawnerFile: filepath.Join(root, "bin", "php-cgi-spawner", "php-cgi-spawner.exe"),
+		NginxPath:         nginxPath,
+		PhpPath:           phpPath,
+		PhpCgiSpawnerFile: phpCgiSpawnerFile,
+		PHPServer: &cmd.PHPServer{
+			PhpCgiSpawnerFile: phpCgiSpawnerFile, 
+			PhpPath: phpPath,
+			Versions: getPhpVersions(phpPath),
+		},
+		NginxServer: &cmd.NginxServer{
+			NginxPath: nginxPath,
+			Versions: getNginxVersions(nginxPath),
+		},
 	}
-
-	// 创建server
-	env.PHPServer = &cmd.PHPServer{PhpCgiSpawnerFile: env.PhpCgiSpawnerFile, PhpPath: env.PhpPath}
-	env.NginxServer = &cmd.NginxServer{NginxPath: env.NginxPath}
 
 	// 配置菜单
 	systray.SetTitle("NP")
 	systray.SetTooltip("NP")
 	setTempIcon(env)
 
-	phpVersions := getPhpVersions(env)
-	env.PHPServer.Versions = phpVersions
-
-	nginxVersions := getNginxVersions(env)
-	env.NginxServer.Versions = nginxVersions
-
-	go watchServerSelected(env, &nginxVersions, phpVersions)
+	go watchServerSelected(env)
 
 	// 创建php版本选择菜单
 	systray.AddMenuItem("选择启用的PHP版本(可多选)", "").Disable()
-	setPhpSelectMenuItem(phpVersions)
+	setPhpSelectMenuItem(env)
 
 	// 创建Nginx版本选择菜单
 	systray.AddMenuItem("选择启用的Nginx版本(单选)", "").Disable()
-	setNginxSelectMenuItem(nginxVersions)
+	setNginxSelectMenuItem(env)
 
 	// 添加一个分隔符
 	systray.AddSeparator()
 
 	// 添加一个菜单项
-	(systray.AddMenuItem("启动服务", "启动服务")).Disable()
+	systray.AddMenuItem("启动服务", "启动服务").Disable()
 
 	// 操作php 服务
 	setPhpServerMenuItem(env)
@@ -141,20 +139,22 @@ func MustCreateTable() {
 	cmd.CreateSettionsTable()
 }
 
-func getNginxVersions(env *Env) []cmd.Server { 
-	nginxList := readNginxDIR(env.NginxPath)
+func getNginxVersions(dir string) []cmd.Server { 
+	nginxList := readNginxDIR(dir)
 	// util.NewUtilLog().Log(fmt.Sprintf("nginxList: %v", nginxList))
 	return saveServers(nginxList)
 }
 
-func getPhpVersions(env *Env) []cmd.Server { 
-	phpList := readPhpDIR(env.PhpPath)
+func getPhpVersions(phpDir string) []cmd.Server { 
+	phpList := readPhpDIR(phpDir)
 	// util.NewUtilLog().Log(fmt.Sprintf("phpList: %v", phpList))
 	return saveServers(phpList)
 }
 
 
-func watchServerSelected(env *Env, nginxList *[]cmd.Server, phpVersions []cmd.Server) {
+func watchServerSelected(env *Env) {
+	phpVersions := env.PHPServer.Versions
+	nginxList := &env.NginxServer.Versions
 	for req := range updateSelectedServerCh { 
 		log.Println("watchServerSelected : ", req.Server)
 		// 解引用指针后进行索引操作
@@ -184,8 +184,8 @@ func watchServerSelected(env *Env, nginxList *[]cmd.Server, phpVersions []cmd.Se
 }
 
 
-func setPhpSelectMenuItem(phpVersions []cmd.Server) {
-	
+func setPhpSelectMenuItem(env *Env) {
+	phpVersions := env.PHPServer.Versions
 	for index, php := range phpVersions {
 		tray := systray.AddMenuItemCheckbox(php.Path, php.Path, (php.Active == 1))
 		go func(tray *systray.MenuItem, php cmd.Server, idx int) {
@@ -206,9 +206,8 @@ func setPhpSelectMenuItem(phpVersions []cmd.Server) {
 	}
 }
 
-func setNginxSelectMenuItem(nginxList []cmd.Server) {
-	
-
+func setNginxSelectMenuItem(env *Env) {
+	nginxList := env.NginxServer.Versions
 	updateNginxChan := make(chan updateNginxMenuItem)
 	nginxBoxes := make([]*systray.MenuItem, 0)
 
