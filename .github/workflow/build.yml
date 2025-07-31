@@ -1,0 +1,22 @@
+on: push
+  paths:
+    - 'go-phpman/**'
+  branches:
+    - main
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.24。3
+      - name: Build
+        run: go build -ldflags="-s -w -H=windowsgui"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: phpman.exe
+          path: phpman.exe
